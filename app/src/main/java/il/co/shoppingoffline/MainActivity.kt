@@ -121,7 +121,7 @@ class MainActivity : Activity() {
                 if (!api.init(tessDir.absolutePath, "heb+eng")) error("אתחול מנוע הזיהוי נכשל")
                 api.setImage(bitmap)
                 val receiptText = api.getUTF8Text() ?: ""
-                api.end()
+                api.recycle()
                 val found = items.filter { !it.bought && containsReceiptItem(receiptText, it.name) }
                 runOnUiThread {
                     found.forEach { it.bought = true }

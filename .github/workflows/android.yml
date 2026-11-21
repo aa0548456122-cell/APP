@@ -1,7 +1,7 @@
 name: Build Android APK
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'experiment/trocr-hebrew' ]
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,6 +32,17 @@ jobs:
           test -s app/src/main/assets/mishkefet/backbone.fp16.onnx
           test -s app/src/main/assets/mishkefet/head.bin
           test -s app/src/main/assets/mishkefet/charset.json
+      - name: Download experimental TrOCR Hebrew handwriting model (offline)
+        if: startsWith(github.ref, 'refs/heads/experiment/trocr-hebrew')
+        run: |
+          mkdir -p app/src/main/assets/trocr
+          BASE="https://huggingface.co/cyttic/hebrew-ocr-android/resolve/main"
+          curl -fL --retry 3 "$BASE/line_large_int8.onnx" -o app/src/main/assets/trocr/line_large_int8.onnx
+          curl -fL --retry 3 "$BASE/charset.json" -o app/src/main/assets/trocr/charset.json
+          curl -fL --retry 3 "$BASE/heb_char6_kn.bin.gz" -o app/src/main/assets/trocr/heb_char6_kn.bin.gz
+          test -s app/src/main/assets/trocr/line_large_int8.onnx
+          test -s app/src/main/assets/trocr/charset.json
+          test -s app/src/main/assets/trocr/heb_char6_kn.bin.gz
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4

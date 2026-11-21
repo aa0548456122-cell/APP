@@ -49,42 +49,72 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
         finally { lines.forEach { if (it !== bitmap && !it.isRecycled) it.recycle() } }
     }
 
-    // Horizontal projection with a modest gap merge; keeps full line width.
+    // Adaptive horizontal-projection line segmentation. Gap size is based on
+    // detected ink height (not page height), so widely-spaced pages do not
+    // accidentally merge neighboring handwritten lines.
     private fun segment(b: Bitmap): List<Bitmap> {
-        val w = b.width; val h = b.height
-        val px = IntArray(w * h); b.getPixels(px, 0, w, 0, 0, w, h)
-        val active = BooleanArray(h)
-        val step = max(1, w / 1400)
+        val w = b.width
+        val h = b.height
+        if (w < 2 || h < 2) return listOf(Bitmap.createBitmap(b))
+
+        val px = IntArray(w * h)
+        b.getPixels(px, 0, w, 0, 0, w, h)
+        val rowInk = IntArray(h)
+        val step = max(1, w / 1800)
+        val sampleCount = (w + step - 1) / step
+        // Ignore faint paper texture while retaining thin pen strokes.
+        val threshold = max(2, (sampleCount * 0.0018f).roundToInt())
+
         for (y in 0 until h) {
-            var ink = 0; var count = 0; var x = 0
+            var ink = 0
+            var x = 0
             while (x < w) {
-                val c = px[y * w + x]
-                val g = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
-                if (g < 190) ink++
-                count++; x += step
+                val color = px[y * w + x]
+                val gray = (Color.red(color) * 299 + Color.green(color) * 587 +
+                    Color.blue(color) * 114) / 1000
+                if (gray < 185) ink++
+                x += step
             }
-            active[y] = count > 0 && ink * 100 / count >= 1
+            rowInk[y] = ink
         }
-        val bands = mutableListOf<Pair<Int, Int>>()
+
+        val active = BooleanArray(h) { rowInk[it] >= threshold }
+        val raw = mutableListOf<Pair<Int, Int>>()
         var start = -1
         for (y in 0 until h) {
             if (active[y] && start < 0) start = y
             if ((!active[y] || y == h - 1) && start >= 0) {
                 val end = if (active[y] && y == h - 1) y + 1 else y
-                if (end - start >= max(8, h / 300)) bands.add(start to end)
+                if (end - start >= max(5, h / 700)) raw.add(start to end)
                 start = -1
             }
         }
-        if (bands.isEmpty()) return listOf(Bitmap.createBitmap(b))
+        if (raw.isEmpty()) return listOf(Bitmap.createBitmap(b))
+
+        // Estimate typical stroke-band height, then bridge only small gaps
+        // caused by dots, punctuation and disconnected pen strokes.
+        val heights = raw.map { it.second - it.first }.sorted()
+        val medianHeight = heights[heights.size / 2]
+        val mergeGap = max(3, (medianHeight * 0.22f).roundToInt())
         val merged = mutableListOf<Pair<Int, Int>>()
-        for (band in bands) {
-            val prev = merged.lastOrNull()
-            if (prev != null && band.first - prev.second < max(4, h / 140))
-                merged[merged.lastIndex] = prev.first to band.second
-            else merged.add(band)
+        for (band in raw) {
+            val previous = merged.lastOrNull()
+            if (previous != null && band.first - previous.second <= mergeGap) {
+                merged[merged.lastIndex] = previous.first to band.second
+            } else {
+                merged.add(band)
+            }
         }
-        return merged.map { (top, bottom) ->
-            val y = max(0, top - 8); val end = min(h, bottom + 8)
+
+        // Discard tiny isolated specks relative to the page's typical writing.
+        val minHeight = max(5, (medianHeight * 0.28f).roundToInt())
+        val useful = merged.filter { it.second - it.first >= minHeight }
+        if (useful.isEmpty()) return listOf(Bitmap.createBitmap(b))
+
+        val verticalPad = max(5, (medianHeight * 0.30f).roundToInt())
+        return useful.map { (top, bottom) ->
+            val y = max(0, top - verticalPad)
+            val end = min(h, bottom + verticalPad)
             Bitmap.createBitmap(b, 0, y, w, end - y)
         }
     }

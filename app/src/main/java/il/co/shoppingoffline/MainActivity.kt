@@ -532,8 +532,8 @@ class MainActivity : Activity() {
 
     private fun productNameFromReceipt(line: String): String {
         val withoutTrailingPrice = line
-            .replace(Regex("""\\s+\\d+[.,]\\d{2}\\s*$"""), "")
-            .replace(Regex("""\\s+₪\\s*\\d+(?:[.,]\\d{2})?\\s*$"""), "")
+            .replace(Regex("""\s+\d+[.,]\d{2}\\s*$"""), "")
+            .replace(Regex("""\\s+₪\s*\\d+(?:[.,]\\d{2})?\\s*$"""), "")
             .trim()
         return withoutTrailingPrice.ifBlank { line.trim() }
     }

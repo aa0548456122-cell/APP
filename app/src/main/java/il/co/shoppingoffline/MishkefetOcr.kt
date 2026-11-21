@@ -24,12 +24,14 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
     private val dim: Int
     private val weights: FloatArray
     private val bias: FloatArray
+    private val decoder: HebrewLanguageDecoder
 
     init {
         val opts = OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) }
         session = env.createSession(File(dir, "backbone.fp16.onnx").absolutePath, opts)
         opts.close()
         val charset = JSONArray(File(dir, "charset.json").readText())
+        decoder = HebrewLanguageDecoder(dir, charset)
         chars = (0 until charset.length()).map { charset.getString(it) }
         val bytes = ByteBuffer.wrap(File(dir, "head.bin").readBytes()).order(ByteOrder.LITTLE_ENDIAN)
         require(String(bytes.array(), 0, 4, Charsets.US_ASCII) == "MKH1") { "קובץ מודל הראש פגום" }
@@ -150,35 +152,26 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
             val result = session.run(mapOf(session.inputNames.first() to tensor))
             try {
                 val batch = (result[0].value as Array<*>)[0] as Array<*>
-                val decoded = StringBuilder()
-                var previous = -1
-                var confidenceSum = 0f; var confidenceCount = 0
-                for (t in batch.indices) {
+                val logits = Array(batch.size) { t ->
                     val f = batch[t] as FloatArray
-                    val scores = FloatArray(classes)
-                    var best = 0
-                    var bestScore = Float.NEGATIVE_INFINITY
-                    for (k in 0 until classes) {
+                    FloatArray(classes) { k ->
                         var score = bias[k]
                         val offset = k * dim
                         for (d in 0 until dim) score += f[d] * weights[offset + d]
-                        scores[k] = score
-                        if (score > bestScore) { bestScore = score; best = k }
+                        score
                     }
-                    // Use the actual posterior confidence, not a constant 1.0.
-                    var expSum = 0.0
-                    for (score in scores) expSum += kotlin.math.exp((score - bestScore).toDouble())
-                    val tokenConfidence = if (expSum > 0.0) (1.0 / expSum).toFloat() else 0f
-                    if (best != 0 && best != previous) {
-                        decoded.append(chars[best])
-                        confidenceSum += tokenConfidence
-                        confidenceCount++
-                    }
-                    previous = best
                 }
-                val text = decoded.toString().trim()
-                val confidence = if (confidenceCount == 0) Float.NEGATIVE_INFINITY else confidenceSum / confidenceCount
-                if (text.isNotBlank() && confidence > bestConfidence) { bestConfidence = confidence; bestText = text }
+                // CTC prefix beam search with Hebrew character 6-gram and word unigram LMs.
+                val text = decoder.decode(logits)
+                var confidenceSum = 0.0
+                var confidenceCount = 0
+                for (row in logits) {
+                    val maxScore = row.maxOrNull() ?: continue
+                    var sum = 0.0
+                    for (v in row) sum += kotlin.math.exp((v - maxScore).toDouble())
+                    if (sum > 0.0) { confidenceSum += 1.0 / sum; confidenceCount++ }
+                }
+                val confidence = if (confidenceCount == 0) Float.NEGATIVE_INFINITY else (confidenceSum / confidenceCount).toFloat()
             } finally { result.close(); tensor.close() }
         }
         return bestText

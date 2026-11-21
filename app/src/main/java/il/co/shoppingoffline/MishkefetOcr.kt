@@ -172,6 +172,10 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
                     if (sum > 0.0) { confidenceSum += 1.0 / sum; confidenceCount++ }
                 }
                 val confidence = if (confidenceCount == 0) Float.NEGATIVE_INFINITY else (confidenceSum / confidenceCount).toFloat()
+                if (confidence > bestConfidence) {
+                    bestConfidence = confidence
+                    bestText = text
+                }
             } finally { result.close(); tensor.close() }
         }
         return bestText

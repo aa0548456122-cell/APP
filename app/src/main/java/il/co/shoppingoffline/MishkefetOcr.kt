@@ -140,7 +140,7 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
      */
     private fun keepHebrewShoppingText(value: String): String = buildString {
         for (ch in value) {
-            if (ch in '\\u0590'..'\\u05FF' || ch in '0'..'9' ||
+            if (ch.code in 0x0590..0x05FF || ch in '0'..'9' ||
                 ch.isWhitespace() || ch in "׳״'\"-.,:;!?()₪") {
                 append(ch)
             }

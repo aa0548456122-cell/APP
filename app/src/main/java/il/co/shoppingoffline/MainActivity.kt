@@ -79,7 +79,7 @@ class MainActivity : Activity() {
             setTextColor(foreground)
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
-            background = rounded(background, 16)
+            this.background = rounded(background, 16)
             isClickable = true
             isFocusable = true
             setPadding(dp(10), dp(12), dp(10), dp(12))
@@ -137,7 +137,7 @@ class MainActivity : Activity() {
             setHintTextColor(0xFF9AA8B4.toInt())
             background = rounded(0xFFF2F5F8.toInt(), 14)
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            singleLine = true
+            setSingleLine(true)
         }
         addCard.addView(input, LinearLayout.LayoutParams(-1, dp(52)))
         val add = actionButton("＋  הוסף לרשימה", 0xFF176B72.toInt(), 0xFFFFFFFF.toInt())
@@ -401,7 +401,7 @@ class MainActivity : Activity() {
 
     private fun extractCandidates(text: String): List<Candidate> {
         val ignored = listOf(
-            "סהכ", "סךהכל", "לתשלום", "מע"מ", "מעמ", "אשראי", "מזומן", "עודף",
+            "סהכ", "סךהכל", "לתשלום", "מע״מ", "מעמ", "אשראי", "מזומן", "עודף",
             "תאריך", "חשבונית", "קבלה", "מספר", "קופה", "שעה", "עסקה", "אישור",
             "כרטיס", "סניף", "כתובת", "הנחה", "הנחות", "מחיר", "סכום", "מועדון",
             "נקודות", "שקלים", "total", "subtotal", "tax", "vat", "change",
@@ -505,8 +505,14 @@ class MainActivity : Activity() {
                 }
                 var added = 0
                 var matched = 0
-                selected.forEach { name ->
-                    val existing = items.firstOrNull { normalize(it.name) == normalize(name) }
+                selected.forEach { line ->
+                    val name = productNameFromReceipt(line)
+                    val lineKey = normalize(name)
+                    val existing = items.firstOrNull {
+                        val existingKey = normalize(it.name)
+                        existingKey.isNotEmpty() &&
+                            (lineKey == existingKey || (existingKey.length >= 3 && lineKey.contains(existingKey)))
+                    }
                     if (existing != null) {
                         existing.bought = true
                         matched++
@@ -522,6 +528,14 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
+    }
+
+    private fun productNameFromReceipt(line: String): String {
+        val withoutTrailingPrice = line
+            .replace(Regex("""\\s+\\d+[.,]\\d{2}\\s*$"""), "")
+            .replace(Regex("""\\s+₪\\s*\\d+(?:[.,]\\d{2})?\\s*$"""), "")
+            .trim()
+        return withoutTrailingPrice.ifBlank { line.trim() }
     }
 
     private fun normalize(value: String): String =

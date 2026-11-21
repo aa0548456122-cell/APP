@@ -46,6 +46,8 @@ class MainActivity : Activity() {
     private val requestGallery = 41
     private val requestCamera = 42
     private var pendingCameraFile: File? = null
+    private enum class ScanPurpose { RECEIPT, HANDWRITTEN_LIST }
+    private var pendingScanPurpose = ScanPurpose.RECEIPT
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -164,12 +166,26 @@ class MainActivity : Activity() {
         })
         val scanRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = View.LAYOUT_DIRECTION_RTL }
         val camera = actionButton("📷  צילום קבלה", 0xFF176B72.toInt(), 0xFFFFFFFF.toInt())
-        camera.setOnClickListener { openCamera() }
-        val gallery = actionButton("▧  בחירה מהגלריה", 0xFFE1ECEE.toInt(), 0xFF17616A.toInt())
-        gallery.setOnClickListener { openGallery() }
+        camera.setOnClickListener { openCamera(ScanPurpose.RECEIPT) }
+        val gallery = actionButton("▧  קבלה מהגלריה", 0xFFE1ECEE.toInt(), 0xFF17616A.toInt())
+        gallery.setOnClickListener { openGallery(ScanPurpose.RECEIPT) }
         scanRow.addView(camera, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(5) })
         scanRow.addView(gallery, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginStart = dp(5) })
         page.addView(scanRow)
+
+        val handwrittenTitle = label("סריקת רשימת קניות בכתב יד", 18f, 0xFF20394D.toInt(), true)
+        page.addView(handwrittenTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
+        page.addView(label("צלם דף עם מוצרים שכתבת. האפליקציה תנסה לקרוא כל שורה ותציג לך מסך לבדיקה ואישור לפני ההוספה.", 12f, 0xFF718292.toInt()).apply {
+            setPadding(0, dp(4), 0, dp(9))
+        })
+        val handwritingRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = View.LAYOUT_DIRECTION_RTL }
+        val handwritingCamera = actionButton("✍️  צילום דף בכתב יד", 0xFF315C83.toInt(), 0xFFFFFFFF.toInt())
+        handwritingCamera.setOnClickListener { openCamera(ScanPurpose.HANDWRITTEN_LIST) }
+        val handwritingGallery = actionButton("▧  דף מהגלריה", 0xFFE5ECF4.toInt(), 0xFF315C83.toInt())
+        handwritingGallery.setOnClickListener { openGallery(ScanPurpose.HANDWRITTEN_LIST) }
+        handwritingRow.addView(handwritingCamera, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginEnd = dp(5) })
+        handwritingRow.addView(handwritingGallery, LinearLayout.LayoutParams(0, dp(56), 1f).apply { marginStart = dp(5) })
+        page.addView(handwritingRow)
 
         status = label("מוכן לקניות. הרשימה נשמרת במכשיר.", 13f, 0xFF416172.toInt())
         status.background = rounded(0xFFE5EFF1.toInt(), 14)
@@ -272,7 +288,8 @@ class MainActivity : Activity() {
         totalValue.text = items.size.toString()
     }
 
-    private fun openCamera() {
+    private fun openCamera(purpose: ScanPurpose) {
+        pendingScanPurpose = purpose
         try {
             val directory = File(cacheDir, "receipts")
             directory.mkdirs()
@@ -290,7 +307,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openGallery() {
+    private fun openGallery(purpose: ScanPurpose) {
+        pendingScanPurpose = purpose
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "image/*"
@@ -308,13 +326,13 @@ class MainActivity : Activity() {
         when (requestCode) {
             requestGallery -> {
                 val uri = data?.data
-                if (uri != null) scanReceipt(uri) else status.text = "לא נבחרה תמונה."
+                if (uri != null) scanReceipt(uri, pendingScanPurpose) else status.text = "לא נבחרה תמונה."
             }
             requestCamera -> {
                 val photo = pendingCameraFile
                 if (photo != null && photo.exists() && photo.length() > 0L) {
                     val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", photo)
-                    scanReceipt(uri)
+                    scanReceipt(uri, pendingScanPurpose)
                 } else {
                     status.text = "לא התקבלה תמונה מהמצלמה. נסה שוב."
                 }
@@ -322,8 +340,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun scanReceipt(uri: Uri) {
-        status.text = "מכין את התמונה ומנסה כמה שיטות זיהוי…"
+    private fun scanReceipt(uri: Uri, purpose: ScanPurpose) {
+        status.text = if (purpose == ScanPurpose.HANDWRITTEN_LIST) "מנסה לקרוא את כתב היד…" else "מכין את הקבלה ומנסה כמה שיטות זיהוי…"
         Thread {
             var original: Bitmap? = null
             var variants: List<Bitmap> = emptyList()
@@ -381,7 +399,7 @@ class MainActivity : Activity() {
                     } else {
                         "הסריקה זיהתה \${candidates.size} שורות אפשריות למוצרים."
                     }
-                    showReceiptReview(candidates, bestText)
+                    showReceiptReview(candidates, bestText, purpose)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -503,7 +521,7 @@ class MainActivity : Activity() {
             .map { Candidate(it) }
     }
 
-    private fun showReceiptReview(found: List<Candidate>, rawText: String) {
+    private fun showReceiptReview(found: List<Candidate>, rawText: String, purpose: ScanPurpose) {
         val candidates = if (found.isNotEmpty()) found else rawText.lines()
             .map { it.trim() }
             .filter { it.count(Char::isLetter) >= 3 }
@@ -517,7 +535,9 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         content.addView(label(
-            "בדוק את הפריטים שזוהו. אפשר לערוך שם, להסיר סימון או לבחור רק חלק.",
+            if (purpose == ScanPurpose.HANDWRITTEN_LIST)
+                "בדוק את המוצרים שהועתקו מהדף. תקן שגיאות, סמן רק את המוצרים הנכונים ואז אשר."
+            else "בדוק את הפריטים שזוהו. אפשר לערוך שם, להסיר סימון או לבחור רק חלק.",
             13f, 0xFF627584.toInt()
         ).apply { setPadding(dp(4), 0, dp(4), dp(10)) })
 
@@ -572,10 +592,17 @@ class MainActivity : Activity() {
         content.addView(rawView)
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle(if (candidates.isEmpty()) "תוצאות סריקת הקבלה" else "זוהו ${candidates.size} שורות בקבלה")
+            .setTitle(
+                if (purpose == ScanPurpose.HANDWRITTEN_LIST) "בדיקת רשימת הקניות שנסרקה"
+                else if (candidates.isEmpty()) "תוצאות סריקת הקבלה"
+                else "זוהו ${candidates.size} שורות בקבלה"
+            )
             .setView(content)
             .setNegativeButton("ביטול", null)
-            .setPositiveButton("הוסף מסומנים לרשימה", null)
+            .setPositiveButton(
+                if (purpose == ScanPurpose.HANDWRITTEN_LIST) "הוסף לרשימת הקניות"
+                else "הוסף מסומנים לרשימה", null
+            )
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -596,7 +623,15 @@ class MainActivity : Activity() {
                         existingKey.isNotEmpty() &&
                             (lineKey == existingKey || (existingKey.length >= 3 && lineKey.contains(existingKey)))
                     }
-                    if (existing != null) {
+                    if (purpose == ScanPurpose.HANDWRITTEN_LIST) {
+                        if (existing == null) {
+                            items.add(Item(name, false))
+                            added++
+                        } else {
+                            existing.bought = false
+                            matched++
+                        }
+                    } else if (existing != null) {
                         existing.bought = true
                         matched++
                     } else {
@@ -606,7 +641,9 @@ class MainActivity : Activity() {
                 }
                 saveItems()
                 renderItems()
-                status.text = "עודכנה הרשימה: ${matched} מוצרים קיימים סומנו כנקנו, ונוספו ${added} מוצרים חדשים."
+                status.text = if (purpose == ScanPurpose.HANDWRITTEN_LIST)
+                    "נוספו ${added} מוצרים מהרשימה שצילמת. ${matched} מוצרים שכבר היו ברשימה סומנו כלא נקנו."
+                else "עודכנה הרשימה: ${matched} מוצרים קיימים סומנו כנקנו, ונוספו ${added} מוצרים חדשים."
                 dialog.dismiss()
             }
         }

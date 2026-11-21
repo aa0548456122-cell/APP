@@ -426,7 +426,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    status.text = "שגיאת סריקה: \${e.localizedMessage ?: e.javaClass.simpleName}"
+                    status.text = "שגיאת סריקה: ${e.localizedMessage ?: e.javaClass.simpleName}"
                 }
             } finally {
                 try { api?.recycle() } catch (_: Exception) {}

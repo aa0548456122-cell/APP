@@ -348,6 +348,27 @@ class MainActivity : Activity() {
             var api: TessBaseAPI? = null
             try {
                 original = decodeBitmap(uri)
+                if (purpose == ScanPurpose.HANDWRITTEN_LIST) {
+                    val modelDir = File(filesDir, "mishkefet")
+                    modelDir.mkdirs()
+                    listOf("backbone.fp16.onnx", "head.bin", "charset.json").forEach { name ->
+                        val target = File(modelDir, name)
+                        if (!target.exists() || target.length() == 0L) {
+                            assets.open("mishkefet/$name").use { src ->
+                                FileOutputStream(target).use { dst -> src.copyTo(dst) }
+                            }
+                        }
+                    }
+                    val recognized = MishkefetOcr(modelDir).use { it.readPage(original!!) }
+                    val raw = recognized.joinToString("\\n")
+                    val candidates = recognized.map { Candidate(it) }
+                    runOnUiThread {
+                        status.text = if (candidates.isEmpty()) "לא זוהו שורות בכתב היד. נסה צילום קרוב ומואר יותר."
+                            else "מודל כתב היד זיהה ${candidates.size} שורות לבדיקה."
+                        showReceiptReview(candidates, raw, purpose)
+                    }
+                    return@Thread
+                }
                 variants = prepareOcrVariants(original!!)
 
                 val tessDir = File(filesDir, "tesseract")

@@ -323,44 +323,74 @@ class MainActivity : Activity() {
     }
 
     private fun scanReceipt(uri: Uri) {
-        status.text = "מכין את התמונה ומזהה את כל שורות הקבלה…"
+        status.text = "מכין את התמונה ומנסה כמה שיטות זיהוי…"
         Thread {
+            var original: Bitmap? = null
+            var variants: List<Bitmap> = emptyList()
+            var api: TessBaseAPI? = null
             try {
-                val original = decodeBitmap(uri)
-                val prepared = prepareForOcr(original)
-                if (prepared !== original) original.recycle()
+                original = decodeBitmap(uri)
+                variants = prepareOcrVariants(original!!)
 
                 val tessDir = File(filesDir, "tesseract")
                 val dataDir = File(tessDir, "tessdata")
                 dataDir.mkdirs()
                 listOf("heb", "eng").forEach { lang ->
                     val target = File(dataDir, "$lang.traineddata")
-                    if (!target.exists()) assets.open("tessdata/$lang.traineddata").use { src ->
-                        FileOutputStream(target).use { dst -> src.copyTo(dst) }
+                    if (!target.exists() || target.length() < 1_000_000L) {
+                        assets.open("tessdata/$lang.traineddata").use { src ->
+                            FileOutputStream(target).use { dst -> src.copyTo(dst) }
+                        }
+                    }
+                    if (!target.exists() || target.length() < 1_000_000L) error("קובץ שפה חסר או פגום: $lang")
+                }
+
+                api = TessBaseAPI()
+                if (!api!!.init(tessDir.absolutePath, "heb+eng", TessBaseAPI.OEM_LSTM_ONLY)) {
+                    error("מנוע זיהוי הטקסט לא הצליח לטעון עברית ואנגלית")
+                }
+                api!!.setVariable("user_defined_dpi", "300")
+                api!!.setVariable("preserve_interword_spaces", "1")
+
+                var bestText = ""
+                var bestScore = 0
+                val modes = listOf(
+                    TessBaseAPI.PageSegMode.PSM_SPARSE_TEXT,
+                    TessBaseAPI.PageSegMode.PSM_SINGLE_COLUMN,
+                    TessBaseAPI.PageSegMode.PSM_AUTO,
+                    TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK
+                )
+                variants.forEach { bitmap ->
+                    modes.forEach { mode ->
+                        api!!.setPageSegMode(mode)
+                        api!!.setImage(bitmap)
+                        val candidate = api!!.getUTF8Text().orEmpty()
+                        val score = candidate.count { it.isLetterOrDigit() }
+                        if (score > bestScore) {
+                            bestScore = score
+                            bestText = candidate
+                        }
                     }
                 }
 
-                val api = TessBaseAPI()
-                if (!api.init(tessDir.absolutePath, "heb+eng", TessBaseAPI.OEM_LSTM_ONLY)) {
-                    prepared.recycle()
-                    error("לא ניתן להפעיל את מנוע זיהוי הטקסט")
-                }
-                api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
-                api.setImage(prepared)
-                val receiptText = api.getUTF8Text().orEmpty()
-                api.recycle()
-                prepared.recycle()
-
-                val candidates = extractCandidates(receiptText)
+                val imageInfo = "\${original!!.width}x\${original!!.height}, \${variants.size} עיבודים"
+                val candidates = extractCandidates(bestText)
                 runOnUiThread {
-                    status.text = if (candidates.isEmpty()) "הסריקה הסתיימה. לא נמצאו שורות מוצר ברורות."
-                    else "הסריקה הסתיימה: זוהו ${candidates.size} שורות אפשריות למוצרים."
-                    showReceiptReview(candidates, receiptText)
+                    status.text = if (candidates.isEmpty()) {
+                        "לא הצלחנו לקרוא טקסט. תמונה: $imageInfo. נסה צילום ישר, קרוב ומואר."
+                    } else {
+                        "הסריקה זיהתה \${candidates.size} שורות אפשריות למוצרים."
+                    }
+                    showReceiptReview(candidates, bestText)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    status.text = "הסריקה נכשלה: ${e.localizedMessage ?: "נסה צילום חד, ישר ומואר יותר"}"
+                    status.text = "שגיאת סריקה: \${e.localizedMessage ?: e.javaClass.simpleName}"
                 }
+            } finally {
+                try { api?.recycle() } catch (_: Exception) {}
+                variants.forEach { try { it.recycle() } catch (_: Exception) {} }
+                try { original?.recycle() } catch (_: Exception) {}
             }
         }.start()
     }
@@ -370,33 +400,42 @@ class MainActivity : Activity() {
         contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("קובץ התמונה אינו תקין")
         var sample = 1
-        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > 3000) sample *= 2
-        val options = BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888 }
+        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > 3600) sample *= 2
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
         return contentResolver.openInputStream(uri).use {
             BitmapFactory.decodeStream(it, null, options)
         } ?: error("לא ניתן לפתוח את התמונה")
     }
 
-    private fun prepareForOcr(source: Bitmap): Bitmap {
+    private fun prepareOcrVariants(source: Bitmap): List<Bitmap> {
         val longest = maxOf(source.width, source.height)
-        val scale = if (longest > 2800) 2800f / longest.toFloat() else 1f
-        val scaled = if (scale < 1f) {
+        val scale = if (longest > 3600) 3600f / longest.toFloat() else 1f
+        val base = if (scale < 1f) {
             Bitmap.createScaledBitmap(source, (source.width * scale).toInt(), (source.height * scale).toInt(), true)
-        } else source
-        val gray = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
-        val matrix = ColorMatrix().apply {
-            setSaturation(0f)
-            postConcat(ColorMatrix(floatArrayOf(
-                1.25f, 0f, 0f, 0f, -24f,
-                0f, 1.25f, 0f, 0f, -24f,
-                0f, 0f, 1.25f, 0f, -24f,
-                0f, 0f, 0f, 1f, 0f
-            )))
+        } else Bitmap.createBitmap(source)
+
+        val gray = Bitmap.createBitmap(base.width, base.height, Bitmap.Config.ARGB_8888)
+        val grayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
         }
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { colorFilter = ColorMatrixColorFilter(matrix) }
-        Canvas(gray).drawBitmap(scaled, 0f, 0f, paint)
-        if (scaled !== source) scaled.recycle()
-        return gray
+        Canvas(gray).drawBitmap(base, 0f, 0f, grayPaint)
+
+        val binary = Bitmap.createBitmap(gray.width, gray.height, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(gray.width * gray.height)
+        gray.getPixels(pixels, 0, gray.width, 0, 0, gray.width, gray.height)
+        for (i in pixels.indices) {
+            val color = pixels[i]
+            val luminance = (android.graphics.Color.red(color) * 299 +
+                android.graphics.Color.green(color) * 587 +
+                android.graphics.Color.blue(color) * 114) / 1000
+            pixels[i] = if (luminance < 175) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+        }
+        binary.setPixels(pixels, 0, gray.width, 0, 0, gray.width, gray.height)
+        base.recycle()
+        return listOf(gray, binary)
     }
 
     private fun extractCandidates(text: String): List<Candidate> {

@@ -66,7 +66,7 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
         val input=FloatArray(pixels.size){i->val c=pixels[i];val g=(android.graphics.Color.red(c)*19595+android.graphics.Color.green(c)*38470+android.graphics.Color.blue(c)*7471+32768) shr 16;1f-g.coerceIn(0,255)/255f}
         val tensor=OnnxTensor.createTensor(env,FloatBuffer.wrap(input),longArrayOf(1,1,64,width.toLong()))
         val result=session.run(mapOf(session.inputNames.first() to tensor))
-        try{
+        return try{
             val batch=(result[0].value as Array<*>)[0] as Array<*>
             val out=StringBuilder();var previous=-1
             for(t in batch.indices){val f=batch[t] as FloatArray;var best=0;var scoreBest=Float.NEGATIVE_INFINITY

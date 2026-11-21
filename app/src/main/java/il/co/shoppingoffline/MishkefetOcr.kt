@@ -96,7 +96,10 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
         // caused by dots, punctuation and disconnected pen strokes.
         val heights = raw.map { it.second - it.first }.sorted()
         val medianHeight = heights[heights.size / 2]
-        val mergeGap = max(3, (medianHeight * 0.22f).roundToInt())
+        // Handwritten Hebrew often has detached dots, upper strokes and final-letter marks.
+        // Bridge a slightly wider vertical gap so these fragments stay with their own line.
+        // The limit remains tied to measured ink height to avoid merging adjacent lines.
+        val mergeGap = max(4, (medianHeight * 0.42f).roundToInt())
         val merged = mutableListOf<Pair<Int, Int>>()
         for (band in raw) {
             val previous = merged.lastOrNull()

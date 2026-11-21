@@ -9,8 +9,8 @@ android {
         applicationId = "il.co.shoppingoffline"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -21,5 +21,6 @@ android {
     }
 }
 dependencies {
+    implementation("androidx.core:core:1.15.0")
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
 }

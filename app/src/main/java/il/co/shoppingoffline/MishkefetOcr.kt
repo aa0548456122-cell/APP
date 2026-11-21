@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import ai.onnxruntime.*
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -30,7 +31,7 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
         val opts = OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) }
         session = env.createSession(File(dir, "backbone.fp16.onnx").absolutePath, opts)
         opts.close()
-        val charset = JSONArray(File(dir, "charset.json").readText())
+        val charset = JSONObject(File(dir, "charset.json").readText()).getJSONArray("chars")
         decoder = HebrewLanguageDecoder(dir, charset)
         chars = (0 until charset.length()).map { charset.getString(it) }
         val bytes = ByteBuffer.wrap(File(dir, "head.bin").readBytes()).order(ByteOrder.LITTLE_ENDIAN)

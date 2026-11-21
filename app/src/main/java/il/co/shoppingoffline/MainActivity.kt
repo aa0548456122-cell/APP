@@ -351,7 +351,7 @@ class MainActivity : Activity() {
                 if (purpose == ScanPurpose.HANDWRITTEN_LIST) {
                     val modelDir = File(filesDir, "mishkefet")
                     modelDir.mkdirs()
-                    listOf("backbone.fp16.onnx", "head.bin", "charset.json").forEach { name ->
+                    listOf("backbone.fp16.onnx", "head.bin", "charlm.bin", "words.bin", "charset.json").forEach { name ->
                         val target = File(modelDir, name)
                         if (!target.exists() || target.length() == 0L) {
                             assets.open("mishkefet/$name").use { src ->
@@ -360,7 +360,7 @@ class MainActivity : Activity() {
                         }
                     }
                     val recognized = MishkefetOcr(modelDir).use { it.readPage(original!!) }
-                    val raw = recognized.joinToString("\\n")
+                    val raw = recognized.joinToString("\n")
                     val candidates = recognized.map { Candidate(it) }
                     runOnUiThread {
                         status.text = if (candidates.isEmpty()) "לא זוהו שורות בכתב היד. נסה צילום קרוב ומואר יותר."

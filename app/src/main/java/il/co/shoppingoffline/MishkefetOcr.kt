@@ -31,7 +31,11 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
         val opts = OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) }
         session = env.createSession(File(dir, "backbone.fp16.onnx").absolutePath, opts)
         opts.close()
-        val charset = JSONObject(File(dir, "charset.json").readText()).getJSONArray("chars")
+        val charsetText = File(dir, "charset.json").readText().trim()
+        // The published Mishkefet charset is normally a root JSON array;
+        // also accept the wrapped {"chars": [...]} format for compatibility.
+        val charset = if (charsetText.startsWith("[")) JSONArray(charsetText)
+            else JSONObject(charsetText).getJSONArray("chars")
         decoder = HebrewLanguageDecoder(dir, charset)
         chars = (0 until charset.length()).map { charset.getString(it) }
         val bytes = ByteBuffer.wrap(File(dir, "head.bin").readBytes()).order(ByteOrder.LITTLE_ENDIAN)

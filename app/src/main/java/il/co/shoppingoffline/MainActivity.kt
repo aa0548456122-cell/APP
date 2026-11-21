@@ -6,6 +6,8 @@ import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
@@ -444,9 +446,33 @@ class MainActivity : Activity() {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return contentResolver.openInputStream(uri).use {
+        val decoded = contentResolver.openInputStream(uri).use {
             BitmapFactory.decodeStream(it, null, options)
         } ?: error("לא ניתן לפתוח את התמונה")
+
+        // Camera/gallery JPEGs often store rotation only in EXIF metadata.
+        // BitmapFactory does not apply that orientation, so normalize it before OCR.
+        val orientation = contentResolver.openInputStream(uri).use { stream ->
+            if (stream == null) ExifInterface.ORIENTATION_UNDEFINED
+            else ExifInterface(stream).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        }
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postScale(-1f, 1f); matrix.postRotate(90f) }
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postScale(-1f, 1f); matrix.postRotate(270f) }
+        }
+        if (matrix.isIdentity) return decoded
+        val oriented = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+        if (oriented !== decoded) decoded.recycle()
+        return oriented
     }
 
     private fun prepareOcrVariants(source: Bitmap): List<Bitmap> {

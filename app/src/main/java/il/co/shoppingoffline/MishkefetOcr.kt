@@ -155,16 +155,23 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
                 var confidenceSum = 0f; var confidenceCount = 0
                 for (t in batch.indices) {
                     val f = batch[t] as FloatArray
-                    var best = 0; var bestScore = Float.NEGATIVE_INFINITY
+                    val scores = FloatArray(classes)
+                    var best = 0
+                    var bestScore = Float.NEGATIVE_INFINITY
                     for (k in 0 until classes) {
                         var score = bias[k]
                         val offset = k * dim
                         for (d in 0 until dim) score += f[d] * weights[offset + d]
+                        scores[k] = score
                         if (score > bestScore) { bestScore = score; best = k }
                     }
+                    // Use the actual posterior confidence, not a constant 1.0.
+                    var expSum = 0.0
+                    for (score in scores) expSum += kotlin.math.exp((score - bestScore).toDouble())
+                    val tokenConfidence = if (expSum > 0.0) (1.0 / expSum).toFloat() else 0f
                     if (best != 0 && best != previous) {
                         decoded.append(chars[best])
-                        confidenceSum += 1f
+                        confidenceSum += tokenConfidence
                         confidenceCount++
                     }
                     previous = best

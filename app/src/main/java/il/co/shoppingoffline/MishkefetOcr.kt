@@ -46,8 +46,17 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
 
     fun readPage(bitmap: Bitmap): List<String> {
         val lines = segment(bitmap)
-        return try { lines.mapNotNull { try { readLine(it).takeIf(String::isNotBlank) } catch (_: Exception) { null } } }
-        finally { lines.forEach { if (it !== bitmap && !it.isRecycled) it.recycle() } }
+        return try {
+            lines.mapIndexedNotNull { index, line ->
+                try {
+                    readLine(line).let(::keepHebrewShoppingText).takeIf(String::isNotBlank)
+                } catch (e: Exception) {
+                    throw IllegalStateException("שגיאה בזיהוי שורה ${index + 1}: ${e.localizedMessage ?: e.javaClass.simpleName}", e)
+                }
+            }
+        } finally {
+            lines.forEach { if (it !== bitmap && !it.isRecycled) it.recycle() }
+        }
     }
 
     // Adaptive horizontal-projection line segmentation. Gap size is based on
@@ -122,6 +131,21 @@ internal class MishkefetOcr(private val dir: File) : AutoCloseable {
             Bitmap.createBitmap(b, 0, y, w, end - y)
         }
     }
+
+    /**
+     * This is a Hebrew shopping-list scanner, not a multilingual document OCR.
+     * Mishkefet's 198-class vocabulary also contains Latin and Arabic symbols;
+     * discard those classes from the final transcript while preserving Hebrew,
+     * digits, whitespace and common list punctuation.
+     */
+    private fun keepHebrewShoppingText(value: String): String = buildString {
+        for (ch in value) {
+            if (ch in '\\u0590'..'\\u05FF' || ch in '0'..'9' ||
+                ch.isWhitespace() || ch in "׳״'\"-.,:;!?()₪") {
+                append(ch)
+            }
+        }
+    }.replace(Regex("[ \\t]+"), " ").trim()
 
     private fun gray(bitmap: Bitmap): Pair<Int, IntArray> {
         val w = bitmap.width; val h = bitmap.height

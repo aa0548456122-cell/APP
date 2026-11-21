@@ -120,7 +120,7 @@ class MainActivity : Activity() {
                 val api = TessBaseAPI()
                 if (!api.init(tessDir.absolutePath, "heb+eng")) error("אתחול מנוע הזיהוי נכשל")
                 api.setImage(bitmap)
-                val receiptText = api.utF8Text ?: ""
+                val receiptText = api.getUTF8Text() ?: ""
                 api.end()
                 val found = items.filter { !it.bought && containsReceiptItem(receiptText, it.name) }
                 runOnUiThread {

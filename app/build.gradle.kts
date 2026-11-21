@@ -22,6 +22,7 @@ android {
 }
 dependencies {
     implementation("androidx.core:core:1.15.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     // On-device inference for the Hebrew handwriting recognizer (no network at runtime).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.2")

@@ -411,10 +411,20 @@ class MainActivity : Activity() {
     }
 
     private fun prepareOcrVariants(source: Bitmap): List<Bitmap> {
+        // Thermal receipts often have faint ink. Upscale moderately before OCR.
         val longest = maxOf(source.width, source.height)
-        val scale = if (longest > 3600) 3600f / longest.toFloat() else 1f
-        val base = if (scale < 1f) {
-            Bitmap.createScaledBitmap(source, (source.width * scale).toInt(), (source.height * scale).toInt(), true)
+        val scale = when {
+            longest < 2400 -> 1.35f
+            longest > 3600 -> 3600f / longest.toFloat()
+            else -> 1f
+        }
+        val base = if (scale != 1f) {
+            Bitmap.createScaledBitmap(
+                source,
+                (source.width * scale).toInt().coerceAtLeast(1),
+                (source.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
         } else Bitmap.createBitmap(source)
 
         val gray = Bitmap.createBitmap(base.width, base.height, Bitmap.Config.ARGB_8888)
@@ -422,19 +432,53 @@ class MainActivity : Activity() {
             colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
         }
         Canvas(gray).drawBitmap(base, 0f, 0f, grayPaint)
+        base.recycle()
 
-        val binary = Bitmap.createBitmap(gray.width, gray.height, Bitmap.Config.ARGB_8888)
-        val pixels = IntArray(gray.width * gray.height)
-        gray.getPixels(pixels, 0, gray.width, 0, 0, gray.width, gray.height)
-        for (i in pixels.indices) {
-            val color = pixels[i]
-            val luminance = (android.graphics.Color.red(color) * 299 +
+        val width = gray.width
+        val height = gray.height
+        val sourcePixels = IntArray(width * height)
+        gray.getPixels(sourcePixels, 0, width, 0, 0, width, height)
+        val luminance = IntArray(sourcePixels.size)
+        for (i in sourcePixels.indices) {
+            val color = sourcePixels[i]
+            luminance[i] = (android.graphics.Color.red(color) * 299 +
                 android.graphics.Color.green(color) * 587 +
                 android.graphics.Color.blue(color) * 114) / 1000
-            pixels[i] = if (luminance < 175) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
         }
-        binary.setPixels(pixels, 0, gray.width, 0, 0, gray.width, gray.height)
-        base.recycle()
+
+        // Adaptive threshold handles uneven lighting and faded thermal ink better
+        // than one fixed black/white threshold for the entire photograph.
+        val stride = width + 1
+        val integral = LongArray((width + 1) * (height + 1))
+        for (y in 1..height) {
+            var rowSum = 0L
+            for (x in 1..width) {
+                rowSum += luminance[(y - 1) * width + (x - 1)]
+                integral[y * stride + x] = integral[(y - 1) * stride + x] + rowSum
+            }
+        }
+
+        val binary = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val output = IntArray(luminance.size)
+        val radius = (minOf(width, height) / 90).coerceIn(12, 28)
+        for (y in 0 until height) {
+            val y0 = (y - radius).coerceAtLeast(0)
+            val y1 = (y + radius + 1).coerceAtMost(height)
+            for (x in 0 until width) {
+                val x0 = (x - radius).coerceAtLeast(0)
+                val x1 = (x + radius + 1).coerceAtMost(width)
+                val sum = integral[y1 * stride + x1] - integral[y0 * stride + x1] -
+                    integral[y1 * stride + x0] + integral[y0 * stride + x0]
+                val mean = sum / ((x1 - x0) * (y1 - y0))
+                val value = luminance[y * width + x]
+                output[y * width + x] = if (value < mean - 7) {
+                    0xFF000000.toInt()
+                } else {
+                    0xFFFFFFFF.toInt()
+                }
+            }
+        }
+        binary.setPixels(output, 0, width, 0, 0, width, height)
         return listOf(gray, binary)
     }
 

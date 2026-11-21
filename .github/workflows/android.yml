@@ -17,16 +17,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Download offline Hebrew and English OCR models
+      - name: Download higher accuracy offline Hebrew and English OCR models
         run: |
           mkdir -p app/src/main/assets/tessdata
-          curl -fL --retry 3 https://github.com/tesseract-ocr/tessdata_fast/raw/main/heb.traineddata -o app/src/main/assets/tessdata/heb.traineddata
-          curl -fL --retry 3 https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata -o app/src/main/assets/tessdata/eng.traineddata
+          curl -fL --retry 3 https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/heb.traineddata -o app/src/main/assets/tessdata/heb.traineddata
+          curl -fL --retry 3 https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/eng.traineddata -o app/src/main/assets/tessdata/eng.traineddata
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: ShoppingOffline-debug-apk
+          name: ShoppingOffline-v1.1-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30

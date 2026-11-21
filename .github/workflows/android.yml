@@ -22,11 +22,21 @@ jobs:
           mkdir -p app/src/main/assets/tessdata
           curl -fL --retry 3 https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/heb.traineddata -o app/src/main/assets/tessdata/heb.traineddata
           curl -fL --retry 3 https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/eng.traineddata -o app/src/main/assets/tessdata/eng.traineddata
+      - name: Download Mishkefet Hebrew handwriting model (offline inference)
+        run: |
+          mkdir -p app/src/main/assets/mishkefet
+          BASE="https://huggingface.co/itayinbar/Mishkefet-v1/resolve/main/onnx"
+          for file in backbone.fp16.onnx head.bin charlm.bin words.bin charset.json; do
+            curl -fL --retry 3 "$BASE/$file" -o "app/src/main/assets/mishkefet/$file"
+          done
+          test -s app/src/main/assets/mishkefet/backbone.fp16.onnx
+          test -s app/src/main/assets/mishkefet/head.bin
+          test -s app/src/main/assets/mishkefet/charset.json
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: ShoppingOffline-v1.1-debug-apk
+          name: ShoppingOffline-v1.2-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
